@@ -1,62 +1,90 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Reflection;
+using System.Linq;
 using IWshRuntimeLibrary;
-using Newtonsoft.Json;
 
 class Program
 {
     static void Main(string[] args)
     {
-        //Пути для папок с иконками и ярлыками
-        string shortcutRootPath = @"C:\Users\user\Desktop\";
+        // Путь к папке с ярлыками на общем рабочем столе
+        string commonDesktopPath = @"C:\Users\Public\Desktop\";
+
+        // Путь к папке с ярлыками на персонализированном (пользовательском) рабочем столе
+        string userDesktopPath = @"C:\Users\user\Desktop\";
+
+        // Путь к папке с иконками
         string iconRootPath = @"D:\My Folder\Design\ico\Black-Red\";
 
-        // Переход в директорию с JSON-файлом
-        string solutionDirectory = Directory.GetParent(Directory.GetCurrentDirectory()).Parent.Parent.FullName;
-        string jsonFilePath = Path.Combine(solutionDirectory, "Data", "shortcuts.json");
-        // Чтение данных из JSON-файла
-        string json = System.IO.File.ReadAllText(jsonFilePath);
-        List<ShortcutIconPair> pairs = JsonConvert.DeserializeObject<List<ShortcutIconPair>>(json);
+        // Получаем список файлов иконок в указанной папке
+        string[] iconFiles = Directory.GetFiles(iconRootPath, "*.ico");
+
+        // Извлекаем имена файлов без расширений и приводим их к нижнему регистру
+        List<string> iconNames = iconFiles.Select(Path.GetFileNameWithoutExtension)
+                                           .Select(name => name.ToLower())
+                                           .ToList();
 
         WshShell shell = new WshShell();
 
-        foreach (var pair in pairs)
-        {
-            string shortcutPath = shortcutRootPath + pair.Shortcut + ".lnk";
-            string iconPath = iconRootPath + pair.Icon + ".ico";
+        // Обновляем ярлыки на общем рабочем столе
+        UpdateShortcuts(shell, commonDesktopPath, iconRootPath, iconNames);
 
-            // Проверяем существование ярлыка
-            if (System.IO.File.Exists(shortcutPath))
-            {
-                // Проверяем существование иконки
-                if (System.IO.File.Exists(iconPath))
-                {
-                    IWshShortcut shortcut = (IWshShortcut)shell.CreateShortcut(shortcutPath);
-                    shortcut.IconLocation = iconPath; // Устанавливаем путь к иконке
-                    shortcut.Save(); // Сохраняем изменения
-
-                    Console.WriteLine($"Иконка ярлыка '{shortcutPath}' успешно изменена.");
-                }
-                else
-                {
-                    Console.WriteLine($"Иконка '{iconPath}' не существует, поэтому для ярлыка '{shortcutPath}' не была изменена");
-                }
-            }
-            else
-            {
-                Console.WriteLine($"Ярлыка '{shortcutPath}' не существует.");
-            }
-        }
+        // Обновляем ярлыки на персонализированном рабочем столе
+        UpdateShortcuts(shell, userDesktopPath, iconRootPath, iconNames);
 
         Console.ReadLine();
     }
 
-    // Класс для хранения пар "ярлык-иконка"
-    class ShortcutIconPair
+    static void UpdateShortcuts(WshShell shell, string shortcutPath, string iconRootPath, List<string> iconNames)
     {
-        public string Shortcut { get; set; }
-        public string Icon { get; set; }
+        foreach (var shortcutFilePath in Directory.GetFiles(shortcutPath, "*.lnk"))
+        {
+            // Получаем только имя файла без расширения и пути
+            string fileName = Path.GetFileNameWithoutExtension(shortcutFilePath);
+
+            // Приводим имя файла к нижнему регистру
+            fileName = fileName.ToLower();
+
+            // Инициализируем переменную для хранения самой длинной подстроки из списка имен иконок
+            string longestIconName = "";
+
+            // Перебираем все имена иконок из списка
+            foreach (var iconName in iconNames)
+            {
+                // Если имя файла содержит подстроку из списка имен иконок и длина этой подстроки больше предыдущей найденной
+                if (fileName.Contains(iconName) && iconName.Length > longestIconName.Length)
+                {
+                    // Обновляем самую длинную подстроку
+                    longestIconName = iconName;
+                }
+            }
+
+            // Если найдена подходящая иконка, создаем путь к ней и заменяем иконку ярлыка
+            if (!string.IsNullOrEmpty(longestIconName))
+            {
+                // Создаем путь к соответствующей иконке
+                string iconPath = Path.Combine(iconRootPath, $"{longestIconName}.ico");
+
+                try
+                {
+                    // Заменяем иконку ярлыка
+                    IWshShortcut shortcut = (IWshShortcut)shell.CreateShortcut(shortcutFilePath);
+                    shortcut.IconLocation = iconPath; // Устанавливаем путь к иконке
+                    shortcut.Save(); // Сохраняем изменения
+
+                    Console.WriteLine($"Иконка ярлыка '{shortcutFilePath}' успешно изменена.");
+                }
+                catch
+                {
+                    Console.WriteLine($"Ошибка доступа к директории '{shortcutPath}'. Запустите приложение от имени администратора");
+                }
+            }
+            else
+            {
+                // Выводим сообщение о том, что подходящая иконка не найдена
+                Console.WriteLine($"Для ярлыка '{shortcutFilePath}' подходящая иконка не найдена.");
+            }
+        }
     }
 }
